@@ -1,45 +1,44 @@
 import axios from 'axios';
 
-export const searchGoogle = async (queries: string[]): Promise<string[]> => {
+export interface CompanyDomain {
+  companyName: string;
+  url: string;
+}
+
+export const searchCompanyDomains = async (companyNames: string[]): Promise<CompanyDomain[]> => {
   const serpApiKey = process.env.SERP_API_KEY;
   if (!serpApiKey) {
-    console.warn("No SERP_API_KEY found, using dummy data for testing.");
-    return [
-      'https://beminimalist.co',
-      'https://mamaearth.in',
-      'https://plumgoodness.com',
-      'https://en.wikipedia.org/wiki/Skincare', // Should be filtered out
-      'https://www.amazon.in/skincare', // Should be filtered out
-    ];
+    throw new Error("No SERP_API_KEY found.");
   }
 
-  const allUrls = new Set<string>();
+  const results: CompanyDomain[] = [];
 
-  // Process up to 2 queries for faster testing
-  const queriesToRun = queries.slice(0, 2); 
-
-  for (const query of queriesToRun) {
+  for (const companyName of companyNames) {
     try {
+      const query = `${companyName} official website`;
       const response = await axios.get('https://serpapi.com/search.json', {
         params: {
           q: query,
           api_key: serpApiKey,
-          num: 40,
+          num: 3,
         }
       });
 
       const organicResults = response.data.organic_results;
-      if (organicResults && Array.isArray(organicResults)) {
-        organicResults.forEach((result: any) => {
-          if (result.link) {
-            allUrls.add(result.link);
-          }
-        });
+      if (organicResults && Array.isArray(organicResults) && organicResults.length > 0) {
+        // Take the very first organic result as the official domain
+        const firstHit = organicResults[0];
+        if (firstHit.link) {
+          results.push({
+            companyName: companyName,
+            url: firstHit.link
+          });
+        }
       }
-    } catch (error) {
-      console.error(`Error fetching results for query: ${query}`, error);
+    } catch (error: any) {
+      console.error(`Error fetching domain for company: ${companyName}`, error.message);
     }
   }
 
-  return Array.from(allUrls);
+  return results;
 };

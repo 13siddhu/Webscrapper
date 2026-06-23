@@ -7,6 +7,14 @@ export interface CrawlResult {
   text: string;
 }
 
+export interface CrawlerSummary {
+  homepageUrl: string;
+  pageTitles: string[];
+  aboutContent: string;
+  contactInfo: string[];
+  socialLinks: string[];
+}
+
 const PAGE_KEYWORDS = ['about', 'team', 'contact', 'career', 'leadership'];
 
 export const crawlCompany = async (homepageUrl: string): Promise<string> => {
@@ -15,10 +23,53 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
   });
   
-  let combinedText = `--- HOMEPAGE: ${homepageUrl} ---\n`;
+  const summary: CrawlerSummary = {
+    homepageUrl,
+    pageTitles: [],
+    aboutContent: '',
+    contactInfo: [],
+    socialLinks: []
+  };
+
   const visitedUrls = new Set<string>();
   const urlsToVisit = new Set<string>();
   urlsToVisit.add(homepageUrl);
+
+  const extractData = ($: cheerio.CheerioAPI) => {
+    // Title & Meta
+    const title = $('title').text().trim();
+    if (title && !summary.pageTitles.includes(title)) {
+      summary.pageTitles.push(title);
+    }
+    const metaDesc = $('meta[name="description"]').attr('content');
+    if (metaDesc) summary.aboutContent += metaDesc + ' ';
+
+    // Clean up useless tags before text extraction
+    $('script, style, noscript, iframe, img, svg, nav, footer').remove();
+
+    // Look for emails and phone numbers in text/hrefs
+    $('a[href^="mailto:"]').each((_, el) => {
+      const email = $(el).attr('href')?.replace('mailto:', '').trim();
+      if (email && !summary.contactInfo.includes(email)) summary.contactInfo.push(email);
+    });
+    $('a[href^="tel:"]').each((_, el) => {
+      const phone = $(el).attr('href')?.replace('tel:', '').trim();
+      if (phone && !summary.contactInfo.includes(phone)) summary.contactInfo.push(phone);
+    });
+
+    // Social Links
+    $('a[href*="linkedin.com"], a[href*="twitter.com"], a[href*="instagram.com"]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (href && !summary.socialLinks.includes(href)) summary.socialLinks.push(href);
+    });
+
+    // Extract text (prioritize main content areas if possible, or fallback to body)
+    const bodyText = $('main, article, #content, .content, body').text().replace(/\s+/g, ' ').trim();
+    if (bodyText) {
+      // Limit text per page to save tokens
+      summary.aboutContent += bodyText.slice(0, 3000) + '\n'; 
+    }
+  };
 
   try {
     const page = await context.newPage();
@@ -27,9 +78,7 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
     const homepageHtml = await page.content();
     const $ = cheerio.load(homepageHtml);
     
-    // Extract text from homepage
-    $('script, style, noscript, iframe, img, svg').remove();
-    combinedText += $('body').text().replace(/\s+/g, ' ').trim() + '\n';
+    extractData($);
     visitedUrls.add(homepageUrl);
 
     // Find internal links for About, Contact, Team, Careers
@@ -62,9 +111,7 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
         const html = await page.content();
         const $page = cheerio.load(html);
-        $page('script, style, noscript, iframe, img, svg').remove();
-        combinedText += `\n--- PAGE: ${url} ---\n`;
-        combinedText += $page('body').text().replace(/\s+/g, ' ').trim() + '\n';
+        extractData($page);
         visitedUrls.add(url);
       } catch (err) {
         console.error(`Failed to crawl ${url}`);
@@ -76,6 +123,6 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
     await browser.close();
   }
 
-  // Limit output text length to save tokens (approx 15000 chars is ~3-4k tokens)
-  return combinedText.slice(0, 25000);
+  // Return a compact stringified JSON
+  return JSON.stringify(summary, null, 2).slice(0, 15000); // Failsafe limit
 };

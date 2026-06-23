@@ -34,7 +34,7 @@ export const CompanyIntelligenceSchema = z.object({
   currentAgency: z.string().nullable().describe("Name of the agency that built the site or runs marketing. Null if none."),
   leadSource: z.string().describe("Source of the lead, e.g., 'Google Search Expansion'"),
   status: z.string().describe("Status of the lead, e.g., 'Enriched'"),
-  companyDescription: z.string().max(300).describe("Brief description of what the company does, product category, target audience, and business model. Max 100 words."),
+  companyDescription: z.string().max(1000).describe("Brief description of what the company does, product category, target audience, and business model. Max 100 words."),
   contactEmail: z.string().nullable().describe("General company contact email."),
   contactPhone: z.string().nullable().describe("General company contact phone."),
   contacts: z.array(ContactSchema).describe("List of identified key contacts/decision makers."),

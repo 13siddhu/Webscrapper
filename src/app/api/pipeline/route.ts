@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
-import { generateQueries } from '@/services/queryGenerator';
-import { searchGoogle } from '@/services/serpApiService';
-import { validateAndExtractWebsites } from '@/services/discoverScraper';
+import { generateCompanyNames } from '@/services/queryGenerator';
+import { searchCompanyDomains } from '@/services/serpApiService';
 import { crawlCompany } from '@/services/crawler';
 import { detectTechStack } from '@/services/techDetector';
-import { analyzeCompany } from '@/services/aiAnalyzer';
+import { analyzeCompany } from '@/services/gemini.service';
 import { enrichDecisionMakers } from '@/services/decisionMaker';
 
 export const dynamic = 'force-dynamic';
@@ -26,57 +25,62 @@ export async function POST(req: NextRequest) {
         };
 
         try {
-          // PHASE 1: Discovery
-          sendEvent('log', { message: `Generating queries for ${niche} in ${country}...` });
-          sendEvent('progress', { percent: 5, message: 'Generating Search Queries...' });
-          const queries = await generateQueries(niche, country);
+          // PHASE 1: Discovery (Precision Mode)
+          sendEvent('log', { message: `Generating exact company names for ${niche} in ${country}...` });
+          sendEvent('progress', { percent: 5, message: 'Generating Target List...' });
+          const companyNames = await generateCompanyNames(niche, country);
           
-          sendEvent('log', { message: `Searching Google with ${queries.length} queries...` });
-          sendEvent('progress', { percent: 15, message: 'Searching Google...' });
-          const urls = await searchGoogle(queries);
+          sendEvent('log', { message: `Resolving official domains for ${companyNames.length} companies...` });
+          sendEvent('progress', { percent: 15, message: 'Finding Official Websites...' });
           
-          sendEvent('log', { message: `Found ${urls.length} raw URLs. Validating domains...` });
-          sendEvent('progress', { percent: 25, message: 'Validating Websites...' });
-          const rawLeads = await validateAndExtractWebsites(urls);
+          // Limit to 5 for testing
+          const companiesToProcess = companyNames.slice(0, 5);
+          const rawLeads = await searchCompanyDomains(companiesToProcess);
           
-          sendEvent('log', { message: `Validated ${rawLeads.length} D2C domains!` });
+          sendEvent('log', { message: `Resolved ${rawLeads.length} official domains!` });
+          sendEvent('progress', { percent: 25, message: 'Websites Found...' });
           
-          // LIMIT FOR TESTING: Only process a maximum of 5 leads
-          const leadsToProcess = rawLeads.slice(0, 5);
-          sendEvent('raw_leads_found', { count: leadsToProcess.length });
+          sendEvent('raw_leads_found', { count: rawLeads.length });
 
           // PHASE 2: Enrichment
-          const totalLeads = leadsToProcess.length;
+          const totalLeads = rawLeads.length;
           
           for (let i = 0; i < totalLeads; i++) {
-            const { companyName, website } = leadsToProcess[i];
+            const { companyName, url: website } = rawLeads[i];
             const baseProgress = 25 + ((i / totalLeads) * 75);
             
-            sendEvent('log', { message: `Crawling ${companyName} (${website})...` });
-            sendEvent('progress', { percent: baseProgress, message: `Crawling ${companyName}...` });
-            const text = await crawlCompany(website);
-            
-            sendEvent('log', { message: `Detecting Tech Stack for ${companyName}...` });
-            sendEvent('progress', { percent: baseProgress + 1, message: `Detecting Tech Stack...` });
-            const techStack = await detectTechStack(website);
-            
-            sendEvent('log', { message: `AI analyzing ${companyName}...` });
-            sendEvent('progress', { percent: baseProgress + 2, message: `AI Analysis running...` });
-            const aiData = await analyzeCompany(companyName, website, text, techStack);
-            
-            sendEvent('log', { message: `Finding Decision Makers for ${companyName}...` });
-            sendEvent('progress', { percent: baseProgress + 3, message: `Enriching Contacts...` });
-            const finalContacts = await enrichDecisionMakers(companyName, aiData.contacts);
-            
-            const finalLead = {
-              companyName,
-              website,
-              ...aiData,
-              contacts: finalContacts
-            };
+            try {
+              sendEvent('log', { message: `Crawling ${companyName} (${website})...` });
+              sendEvent('progress', { percent: baseProgress, message: `Crawling ${companyName}...` });
+              const text = await crawlCompany(website);
+              
+              sendEvent('log', { message: `Detecting Tech Stack for ${companyName}...` });
+              sendEvent('progress', { percent: baseProgress + 1, message: `Detecting Tech Stack...` });
+              const techStack = await detectTechStack(website);
+              
+              sendEvent('log', { message: `AI analyzing ${companyName}...` });
+              sendEvent('progress', { percent: baseProgress + 2, message: `AI Analysis running...` });
+              const aiData = await analyzeCompany(companyName, website, text, techStack);
+              
+              sendEvent('log', { message: `Finding Decision Makers for ${companyName}...` });
+              sendEvent('progress', { percent: baseProgress + 3, message: `Enriching Contacts...` });
+              const finalContacts = await enrichDecisionMakers(companyName, website, aiData.contacts);
+              
+              const finalLead = {
+                companyName,
+                website,
+                ...aiData,
+                contacts: finalContacts
+              };
 
-            sendEvent('log', { message: `Successfully enriched ${companyName}! Total Score: ${finalLead.totalScore}/100` });
-            sendEvent('lead_complete', { lead: finalLead, index: i });
+              sendEvent('log', { message: `Successfully enriched ${companyName}! Total Score: ${finalLead.totalScore}/100` });
+              sendEvent('lead_complete', { lead: finalLead, index: i });
+            } catch (leadError: any) {
+              console.error(`Error enriching ${companyName}:`, leadError);
+              sendEvent('log', { message: `Failed to process ${companyName}. Skipping... (${leadError.message})` });
+              // Continue to the next lead instead of crashing the pipeline
+              continue;
+            }
           }
 
           sendEvent('progress', { percent: 100, message: 'Complete!' });
