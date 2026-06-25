@@ -48,6 +48,11 @@ export default function UnifiedLeadPlatform() {
         body: JSON.stringify({ niche, country }),
       });
 
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Server returned ${res.status}: ${errorText}`);
+      }
+
       if (!res.body) throw new Error('No body returned from API');
       
       const reader = res.body.getReader();
@@ -56,7 +61,10 @@ export default function UnifiedLeadPlatform() {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          setIsProcessing(false);
+          break;
+        }
         
         buffer += decoder.decode(value, { stream: true });
         const events = buffer.split('\n\n');
@@ -97,6 +105,7 @@ export default function UnifiedLeadPlatform() {
     } catch (err: any) {
       alert(`Pipeline Error: ${err.message}`);
       setIsProcessing(false);
+      setProgressMsg('Error occurred');
     }
   };
 

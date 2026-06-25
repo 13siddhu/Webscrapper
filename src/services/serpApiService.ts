@@ -13,7 +13,7 @@ export const searchCompanyDomains = async (companyNames: string[]): Promise<Comp
 
   const results: CompanyDomain[] = [];
 
-  for (const companyName of companyNames) {
+  const promises = companyNames.map(async (companyName) => {
     try {
       const query = `${companyName} official website`;
       const response = await axios.get('https://serpapi.com/search.json', {
@@ -29,15 +29,21 @@ export const searchCompanyDomains = async (companyNames: string[]): Promise<Comp
         // Take the very first organic result as the official domain
         const firstHit = organicResults[0];
         if (firstHit.link) {
-          results.push({
+          return {
             companyName: companyName,
             url: firstHit.link
-          });
+          };
         }
       }
     } catch (error: any) {
       console.error(`Error fetching domain for company: ${companyName}`, error.message);
     }
+    return null;
+  });
+
+  const resolved = await Promise.all(promises);
+  for (const r of resolved) {
+    if (r) results.push(r);
   }
 
   return results;
