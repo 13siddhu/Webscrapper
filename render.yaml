@@ -3,7 +3,7 @@ services:
     name: lead-discovery-mvp
     env: docker
     region: ohio
-    plan: starter
+    plan: free
     healthCheckPath: /
     envVars:
       - key: GEMINI_API_KEY
