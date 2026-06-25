@@ -44,10 +44,7 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
     const metaDesc = $('meta[name="description"]').attr('content');
     if (metaDesc) summary.aboutContent += metaDesc + ' ';
 
-    // Clean up useless tags before text extraction
-    $('script, style, noscript, iframe, img, svg, nav, footer').remove();
-
-    // Look for emails and phone numbers in text/hrefs
+    // Look for emails and phone numbers in text/hrefs BEFORE deleting tags
     $('a[href^="mailto:"]').each((_, el) => {
       const email = $(el).attr('href')?.replace('mailto:', '').trim();
       if (email && !summary.contactInfo.includes(email)) summary.contactInfo.push(email);
@@ -57,11 +54,24 @@ export const crawlCompany = async (homepageUrl: string): Promise<string> => {
       if (phone && !summary.contactInfo.includes(phone)) summary.contactInfo.push(phone);
     });
 
+    // Aggressively scan all text for unlinked phone numbers (e.g. +91 9876543210, 1-800-123-4567)
+    const rawText = $('body').text();
+    const phoneRegex = /(?:\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/g;
+    const foundPhones = rawText.match(phoneRegex);
+    if (foundPhones) {
+      foundPhones.forEach(phone => {
+        if (!summary.contactInfo.includes(phone)) summary.contactInfo.push(phone);
+      });
+    }
+
     // Social Links
     $('a[href*="linkedin.com"], a[href*="twitter.com"], a[href*="instagram.com"]').each((_, el) => {
       const href = $(el).attr('href');
       if (href && !summary.socialLinks.includes(href)) summary.socialLinks.push(href);
     });
+
+    // NOW clean up useless tags before large text extraction
+    $('script, style, noscript, iframe, img, svg, nav, footer').remove();
 
     // Extract text (prioritize main content areas if possible, or fallback to body)
     const bodyText = $('main, article, #content, .content, body').text().replace(/\s+/g, ' ').trim();
